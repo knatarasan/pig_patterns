@@ -1,0 +1,116 @@
+﻿Pig eye for sql guy
+
+For anyone who came of programming age before cloud computing burst its way into the technology scene, data analysis has long been synonymous with SQL. A slightly awkward, declarative language whose production can more resemble logic puzzle solving than coding, SQL and the relational databases it builds on have been the pervasive standard for how to deal with data.
+As the world has changed, so too has our data; an ever-increasing amount of data is now stored without a rigorous schema, or must be joined to outside data sets to be useful. Compounding this problem, often the amounts of data are so large that working with them on a traditional SQL database is so non-performant as to be impractical.
+Enter Pig, a SQL-like language that gracefully tolerates inconsistent schemas, and that runs on Hadoop. (Hadoop is a massively parallel platform for processing the largest of data sets in reasonable amounts of time. Hadoop powers Facebook, Yahoo, Twitter, and LinkedIn, to name a few in a growing list.)
+This then is a brief guide for the SQL developer diving into the waters of Pig Latin for the first time. Pig is similar enough to SQL to be familiar, but divergent enough to be disorienting to newcomers. The goal of this guide is to ease the friction in adding Pig to an existing SQL skillset.
+WHAT’S SIMILAR?
+The basic concepts in SQL map pretty well onto Pig. There are analogues for the major SQL keywords, and as a result you can write a query in your head as SQL and then translate it into Pig Latin without undue mental gymnastics.
+WHERE → FILTER
+The syntax is different, but conceptually this is still putting your data into a funnel to create a smaller dataset.
+HAVING → FILTER
+Because a FILTER is done in a separate step from a GROUP or an aggregation, the distinction between HAVING and WHERE doesn’t exist in Pig.
+ORDER BY → ORDER
+This keyword behaves pretty much the same in Pig as in SQL.
+JOIN
+In Pig, joins can have their execution specified, and they look a little different, but in essence these are the same joins you know from SQL, and you can think about them in the same way. There are INNER and OUTER joins, RIGHT and LEFT specifications, and even CROSS for those rare moments that you actually want a Cartesian product.
+Because Pig is most appropriately used for data pipelines, there are often fewer distinct relations or tables than you would expect to see in a traditional normalized relational database.
+CONTROL OVER EXECUTION
+SQL performance tuning generally involves some fiddling with indexes, punctuated by the occasional yelling at an explain plan that has inexplicably decided to join the two largest tables first. It can mean getting a different plan the second time you run a query, or having the plan suddenly change after several weeks of use because the statistics have evolved, throwing your query’s performance into the proverbial toilet.
+Various SQL implementations offer hints to combat this problem—you can use a hint to tell your SQL optimizer that it should use an index, or to force a given table to be first in the join order. Unfortunately, because hints are dependent on the particular SQL implementation, what you actually have at your disposal varies by platform.
+Pig offers a few different ways to control the execution plan. The first is just the explicit ordering of operations. You can write your FILTER before your JOIN (the reverse of SQL’s order) and be clever about eliminating unused fields along the way, and have confidence that the executed order will not be worse.
+Secondly, the philosophy of Pig is to allow users to choose implementations where multiple ones are possible. As a result, there are three specialized joins that a can be used when the features of the data are known, and are less appropriate for a regular join. For regular joins, the order of the arguments dictates execution—the larger data set should appear last in this type of join.
+As with SQL, in Pig you can pretty much ignore the performance tweaks until you can’t. Because of the explicit control of ordering, it can be useful to have a general sense of the “good” order to do things in, though Pig’s optimizer will also try to push up FILTERs and LIMITs, taking some of the pressure off.
+WHAT’S DIFFERENT?
+A Row By Any Other Name
+The SQL paradigm is very straightforward—there are tables, and tables contain rows. Every select statement yields a set of rows, and each field in a row is a basic data type. Conceptually, the result of any SQL select statement can be imported into Excel without loss of information.
+Pig introduces a mature nesting notion in tuples and data bags that changes the game significantly. Pig consists of data sets called relations (sometimes called aliases for the names they are given), and those contain records that are data tuples, which can in turn recursively contain data bags, data tuples, or data items. There is distinct lack of flatness in Pig, and the best way to see it is to explore how GROUP works.
+Not Your Grandmother’s GROUP
+In the handling of GROUP, SQL and Pig diverge significantly. SQL’s GROUP doesn’t exist outside of the aggregation performed on it; you would never SELECT * GROUP by field1–it just doesn’t make sense. Because everything in SQL is a row, the grouping created isn’t persistent—only the data produced aggregating over it remains.
+Pig’s GROUP is an entirely different beast, albeit used for the same purpose. It is a persistent relation that can be used agan, independent of what aggregations you might choose to perform on it later.
+student_grades = GROUP grades by student;
+This student_grades relation has two fields: one called group and populated with the value of student, the other called grades populated with a data bag containing tuples for all the entries with the same value of student.
+group   grades
+alyssa  {< hacking101, 95 >, < english, 60 >}
+ben     {< math, 90 >}
+Now to do an aggregation, perform it on the student_grades alias.
+average_grades = FOREACH student_grades GENERATE group, AVG(grades.value);
+Procedural Paradise
+This is the first thing any Google search on Pig will tell you, and it is the most glaringly obvious change from SQL. After having taught your brain for years how to turn an idea inside-out and mash all of its pieces into one query, Pig makes query writing feel like writing Java or C++. In addition to to obvious potential cognitive benefits, this has some technical ones as well.
+Subquery Reuse
+Ever write a query with a subselect, and then realize you actually needed to use that subtable twice in the query? Did you feel absolutely awful as you cut and pasted that subtable? Did you wonder whether your SQL plan would successfully manage to not calculate it twice? (Note: the WITH clause mitigates this pain in a lot of cases, but isn’t available in all flavors of SQL.)
+Because in Pig Latin every step has a declared alias, reusing “subquery” tables is natural and intuitive, and generally does not involve building them twice.
+Getting multiple queries out of one pipeline
+In SQL you can find yourself in a place where you want to use the data, do some manipulation on it, and then take it in a few different directions. To do this in one query requires profligate use of JOIN, and enough parens to intimidate a LISP hacker.
+In a Pig pipeline, any and all aliases produced along the way can be stored, and all it takes is adding a new STORE statement to the script.
+User-Defined Functions
+SQL has had decades for people to figure out what analytic functions they need for arbitrary data analysis, and so when you find yourself suddenly interested in extracting the day of the week from a date, that function is ready and waiting.
+Pig’s list of built-in functions is growing, but is still dwarfed by what Oracle or MYSQL provides. What turns this into a tolerable constraint is that Pig allows the user to define aggregate or analytic functions in other languages (Java, Python, and others) and then apply them in Pig quickly and without fuss.
+REGISTER udf.jar;
+
+new_data = FOREACH my_data GENERATE udf.ImportantFunction(field1);
+The Well-Disguised SQLer
+In general, if you can think about it in SQL, you can do it in Pig. Be aware of the nested data structures, have a cheat sheet for syntax, and relish the ability to write queries the way your brain thinks them, and not the way SQL demands.
+As a final thought, let’s resurrect our old friend the emp table, and take a look at some SQL to Pig Latin examples.
+Average Salary by Location
+SQL
+SELECT loc, AVG(sal) FROM emp JOIN dept USING(deptno) WHERE sal > 3000 GROUP BY loc;
+Pig Latin
+filtered_emp = FILTER emp BY sal > 3000;
+
+emp_join_dept = JOIN filtered_emp BY deptno, dept BY deptno;
+
+grouped_by_loc = GROUP emp_join_dept BY loc;
+
+avg_salary = FOREACH grouped_by_loc GENERATE group, AVG(emp_join_dept.sal);
+Ordered Average Salary by Location
+Suppose now that the following is true.
+● The ‘loc’ field is a string/varchar field, and we have two pieces of software that automatically populate it. One stores values as lowercase, one as uppercase. (If this seems like a contrived example to you, you have chosen your employers and software vendors well.)
+The new parts of the queries appear in bold.
+SQL
+SELECT standard_loc, AVG(sal) avg_salary FROM
+(SELECT UPPER(loc) standard_loc, sal FROM emp JOIN dept USING(deptno) WHERE sal > 3000) std_table GROUP BY standard_loc;
+Pig Latin
+filtered_emp = FILTER emp BY sal > 3000;
+
+emp_join_dept = JOIN filtered_emp BY deptno, dept BY deptno;
+
+grouped_by_loc = GROUP emp_join_dept BY UPPER(loc);
+
+avg_salary = FOREACH grouped_by_loc GENERATE group, AVG(emp_join_dept.sal);
+This kind of change is friendlier to Pig because of the limitations in SQL’s GROUP BY clause; the trade-off of verboseness for clarity increases in value the more complex your query gets.
+Above Average Salary for Location
+Now suppose instead of arbitrarily selecting 3,000 as a threshold, which is going to overselect people living in large expensive cities, we want to select those employees who make more than twice the average for their location.
+SQL
+There are several ways to accomplish this, of course, but for illustration purposes the most vanilla version is shown here.
+SELECT empno FROM 
+(SELECT empno, UPPER(loc) standard_loc, sal FROM emp JOIN dept USING(deptno)) std_table1 JOIN
+(SELECT standard_loc, AVG(sal) avg_salary FROM
+(SELECT UPPER(loc) standard_loc, sal FROM emp JOIN dept USING(deptno)) std_table2 GROUP BY standard_loc) grp_table2
+USING(standard_loc) WHERE sal > (2 * avg_salary);
+Pig Latin
+emp_join_dept = JOIN emp BY deptno, dept by deptno;
+
+grouped_by_loc = GROUP emp_join_dept BY UPPER(loc);
+
+loc_avg_salary = FOREACH grouped_by_loc GENERATE AVG(emp_join_dept.sal) as avg_salary, FLATTEN(emp_join_dept);
+
+highly_paid = FILTER loc_avg_salary BY sal > (2 * avg_salary);
+Here the dreaded subquery reuse rears its unattractive head in SQL and leads to a bit of a frankenquery. In contrast, the Pig script stays the same length, because we can effectively just shift the FILTER from the beginning to the end of our data flow. FLATTEN is a new entry to our function arena, for which there is no SQL analogue. What FLATTEN does is unnest tuples and data bags; in this example it’s taking the data bag ‘emp_join_dept’ created by the GROUP function, and removing the nesting so that the fields within it will be at the same level as avg_salary.
+Run It Yourself for the Swine-Curious
+If you want to to try out some Pig examples hands-on, you can get a free Mortar account here. We’ve generated a one million row emp table data set, so to run these examples on your own all you need to do is:
+1. Sign up at app.mortardata.com for a free account.
+2. Go to Web Projects
+3. Select My Web Projects -> New Blank project
+4. To load the two data files, you need LOAD statements, and to store the resulting data you need a STORE statement, so in the end your pig script should look like this:
+dept = LOAD 's3n://mortar-example-data/employee/dept.csv' USING org.apache.pig.piggybank.storage.CSVExcelStorage(',', 'NO_MULTILINE', 'NOCHANGE', 'SKIP_INPUT_HEADER')
+    AS (deptno:int, dname:chararray, loc:chararray);
+
+emp = LOAD 's3n://mortar-example-data/employee/emp.csv' USING org.apache.pig.piggybank.storage.CSVExcelStorage(',', 'NO_MULTILINE', 'NOCHANGE', 'SKIP_INPUT_HEADER')
+    AS (empno:int, ename:chararray, job:chararray, mgr:int, hiredate:chararray, sal:float, deptno:int);
+
+-- Pig example code here
+
+STORE avg_salary INTO 's3n://mortar-example-output-data/$MORTAR_EMAIL_S3_ESCAPED/emp_example’ USING PigStorage('\t');
+5. Click Run and select a 2-node cluster. Even with one million rows, it runs in under three minutes. Sit back and watch the power of modern computing tackle the problems of the 1980s.
+

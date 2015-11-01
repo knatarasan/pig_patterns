@@ -1,0 +1,73 @@
+﻿Pig eye for sql guy-Redux
+
+This post is the second in a series about translating SQL concepts into Pig. You can read the first post here.
+SQL is a state of mind. Even for the Pig enthusiast who has gained some comfort in the porcine language, problem solving using SQL patterns may still be second nature. What could be a frustrating tendency of thinking in the wrong language is actually a boon, as long as you have some quick translations handy. Conveniently, we’ve got a SQL->Pig Cheat Sheet for just this purpose.
+SELECT * FROM
+For some reason, though SQL examples of SELECT * are everywhere, it’s not very often that a Pig example uses the syntax. Never fear, the convention does exist.
+SQL
+SELECT * FROM table;
+Pig
+alias = FOREACH table GENERATE *;
+Because the fields in a Pig relation are ordered, there’s some other tasty syntactic sugar:
+alias = FOREACH table GENERATE $0, $2;
+The ordering is 0-indexed, so the line above grabs the first and third fields oftable.
+alias = FOREACH table GENERATE field1..field3;
+
+alias = FOREACH table GENERATE field3..;
+The .. syntax means “everything in between”, so the first statement gets field1, field2, and field3, while the second statement gets everything from field3 to the last field.
+Self-Join
+This is the classic first-level of SQL foo. Someone gives you a table of employees and asks you to return each employee and his or her supervisor. Each supervisor is also an employee. You immediately launch into a suave self-join to answer the question.
+SQL
+SELECT emp.ename, sup.ename
+    FROM emp JOIN emp as sup
+    ON (emp.mgr = sup.empno);
+How does it work in Pig? Pretty much the same with one major caveat: you have to make a copy of the relation before you can do the join.
+In other words, Pig doesn’t actually allow a join of a relation to itself, but it has no problem joining two relations with identical schema and data.
+Pig
+sup = FOREACH emp GENERATE *;
+
+names = FOREACH (JOIN emp BY mgr, sup BY empno) GENERATE 
+    emp.ename, sup.ename;
+OVER … PARTITION BY
+Not everyone is familiar with this syntax, but it’s pretty much the only way to accomplish a large class of tasks in SQL. OVER … PARTITION BY segments the data such that each partition is treated independently in the rest of the statement. One common use case is to attach the results of aggregate functions to the rows that composed them.
+SQL
+SELECT ename, mgr, hiredate,
+    AVG(sal) OVER (PARTITION BY hiredate) as avg_sal
+    FROM emp;
+This would tell us, for each employee, what the average salary is of all the employees hired on the same date.
+Pig
+The only way to do this in Pig is MySQL style, which is to say, using a join.
+sal_data = FOREACH (GROUP emp BY hiredate) GENERATE 
+    group as hiredate, AVG(sal) as avg_sal;
+
+final_data = FOREACH (JOIN sal_data BY hiredate, emp by hiredate) GENERATE 
+    ename, mgr, sal_data::hiredate, avg_sal;
+For almost all other PARTITION cases, the analog in Pig is a nested FOREACH. For example: using first_value() or last_value() to order a segment and then extract one row.
+SQL
+SELECT first_value(ename) 
+    OVER (PARTITION BY hiredate, ORDER BY salary ASC) as name 
+    FROM emp;
+Pig
+FOREACH (GROUP emp BY hiredate) {
+    ordered  = ORDER emp BY sal ASC;
+    limited = LIMIT ordered 1;
+    GENERATE FLATTEN(limited);
+}
+Once you are inside the braces, you are dealing with the subsegment of data within a single group, in very much the same way that the “OVER (PARTITION BY field)” statement acts over that partitioned subset.
+ROWNUM
+Endlessly useful for providing a unique and persistent ordering over data, row_number() is a SQL standby.
+SQL
+SELECT ename, hiredate, row_number() 
+    OVER (PARTITION BY hiredate, ORDER by sal ASC) as rownum 
+    FROM emp;
+In Pig 0.11 a RANK operator was added, but its behavior is not the same as the classic ROWNUM; Pig’s RANK repeats ranks for tied items, and unless the keyword DENSE is used, it will also skip values after a tie. The best actual analog is datafu’s Enumerate UDF.
+Pig
+FOREACH (GROUP emp by hiredate) {
+    ordered  = ORDER emp BY sal ASC;
+    GENERATE FLATTEN(Enumerate(ordered));
+}
+This again uses that GROUP plus nested FOREACH syntax that mimics the OVER…PARTITION BY.
+Having a few handy analogs makes it faster to translate complex ideas from SQL into Pig. For more simple translations, check out the SQL->Pig Cheat Sheet, and for even more Piggy goodness, download our comprehensive Pig Cheat Sheet, which includes the SQL conversions and a bunch of other Pig commands, too.
+
+
+
